@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ixtli Holo Cube</title>
+<style>
+:root{--bg:#06100a;--c:#0c1a12;--c2:#102418;--l:#173a25;--i:#d4f7de;--d:#78a98a;--g:#4aff82}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--i);font:16px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:14px;max-width:760px;margin:0 auto}
+header{display:flex;align-items:center;gap:10px;padding:4px 0 14px}
+h1{font:700 20px ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--g);text-transform:uppercase}
+.lg{width:32px;height:32px}
+section{background:var(--c);border:1px solid var(--l);border-radius:14px;padding:14px;margin-bottom:12px}
+h2{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--d);margin-bottom:10px}
+.m{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.m button{all:unset;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 2px 9px;border-radius:12px;background:var(--c2);border:1px solid var(--l);font:600 13px sans-serif;text-align:center}
+.m button:active,.b:active{transform:scale(.96)}
+.m button.a{border-color:var(--g);background:#12351f}
+.m svg{width:28px;height:28px;stroke:var(--g);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.b{all:unset;cursor:pointer;padding:10px 16px;border-radius:10px;background:var(--c2);border:1px solid var(--l);font:600 14px sans-serif;display:inline-block}
+.r{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+.big{font:700 44px/1 ui-monospace,Menlo,monospace;color:var(--g)}
+input[type=range]{width:100%;height:34px;accent-color:var(--g)}
+.seg{display:flex;background:var(--c2);border:1px solid var(--l);border-radius:10px;padding:3px;gap:3px;flex-wrap:wrap;margin-bottom:8px}
+.seg button{all:unset;cursor:pointer;flex:1;text-align:center;padding:8px 6px;border-radius:8px;font:600 13px sans-serif;color:var(--d);min-width:60px}
+.seg button.a{background:var(--g);color:#031208}
+.lab{font:600 11px ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--d);margin:10px 0 5px;text-transform:uppercase}
+.sw{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.sw i{width:32px;height:32px;border-radius:50%;cursor:pointer;display:block;box-shadow:0 0 0 1px var(--l)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+input[type=text]{background:var(--c2);color:var(--i);border:1px solid var(--l);border-radius:9px;padding:9px 10px;font:inherit;width:100%;margin-top:6px}
+a{color:var(--g)}
+.h{display:none}
+.t{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#12351f;border:1px solid var(--g);padding:9px 16px;border-radius:10px;font:600 14px sans-serif;opacity:0;transition:.2s;pointer-events:none}
+.t.s{opacity:1}
+@media(max-width:600px){.g2{grid-template-columns:1fr}}
+</style></head><body>
+<header><svg class="lg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="none" stroke="#f2c14e" stroke-width="2"/><circle cx="20" cy="20" r="13.5" fill="none" stroke="#4af0a0" stroke-width="1.2"/><ellipse cx="20" cy="20" rx="8" ry="5.6" fill="#e9f2ec"/><circle cx="20" cy="20" r="3.6" fill="#2ec4b6"/><circle cx="20" cy="20" r="1.5" fill="#050706"/></svg><h1>Ixtli Holo Cube</h1></header>
+
+<section id="ap" class="h"><h2>Wi-Fi setup</h2>
+<input id="ssid" type="text" placeholder="Network name (SSID)"><input id="pwd" type="text" placeholder="Password">
+<div class="r"><button class="b" onclick="wifi()">Connect</button></div></section>
+
+<div id="main">
+<section><h2>Show on the screen</h2><div class="m" id="m"></div>
+<div class="r"><button class="b" onclick="C(300)">&#9664; Previous</button><button class="b" onclick="C(301)">Next &#9654;</button></div></section>
+
+<div class="g2">
+<section><h2>Volume</h2><div class="big"><span id="vv">-</span></div><input type="range" id="vol" min="0" max="100">
+<div class="lab">Music play order</div><div class="seg" id="sm"></div><div class="lab">Video play order</div><div class="seg" id="sv"></div></section>
+<section><h2>Ring light</h2><div class="lab" style="margin-top:0">Brightness</div><input type="range" id="bri" min="0" max="100"><div class="sw" id="sw"></div>
+<div class="lab">Photo album</div><div class="seg" id="sa"></div></section>
+</div>
+
+<section><h2>More</h2>
+<p style="color:var(--d);font-size:14px;margin-bottom:8px">Upload videos and pictures, house panels and software updates live in the hub.</p>
+<div class="r"><a class="b" id="hub" href="http://10.0.0.196:8098/" style="text-decoration:none;background:var(--g);color:#031208;border-color:var(--g)">Open the hub</a><button class="b" onclick="if(confirm('Restart the device?'))C(900)">Restart</button></div>
+<div id="gain" class="h"><div class="lab">Spectrum gain (do it in a quiet room)</div><div class="seg" id="sg"></div></div>
+<div class="lab">PC stats host (AIDA64) IP</div><input id="host" type="text" placeholder="e.g. 10.0.0.20"><div class="r"><button class="b" onclick="host()">Save</button></div></section>
+</div>
+<div class="t" id="t"></div>
+<script>
+var $=function(i){return document.getElementById(i)},S={},I={Clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',Video:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/>',Album:'<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',Music:'<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2.5"/><circle cx="17" cy="16" r="2.5"/>',Bluetooth:'<path d="M7 7l10 10-5 4V3l5 4L7 17"/>',Weather:'<circle cx="9" cy="9" r="3"/><path d="M9 2v2M2 9h2M4 4l1.5 1.5M14 4l-1.5 1.5"/><path d="M8 20h9a4 4 0 0 0 0-8 5 5 0 0 0-9.6 1.6A3.3 3.3 0 0 0 8 20z"/>',Spectrum:'<path d="M5 20V12M9 20V5M13 20V9M17 20V14M21 20V8"/>',Stats:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'},
+M=[['Clock',102],['Video',103],['Album',104],['Music',109],['Bluetooth',110],['Weather',107],['Spectrum',105],['Stats',106]],
+COL=[[255,190,110],[255,255,255],[255,60,60],[255,140,0],[255,230,0],[60,255,100],[0,220,255],[40,90,255],[170,70,255],[255,70,180]],
+LP={sv:[['One',400],['List',401],['Shuffle',402]],sm:[['One',420],['List',421],['Shuffle',422]],sa:[['Single',410],['Slideshow',411],['Random',412],['Random show',413]]};
+var Q=Promise.resolve();function req(u){var p=Q.then(function(){return fetch(u).catch(function(){return new Promise(function(r){setTimeout(r,400)}).then(function(){return fetch(u)})})});Q=p.then(function(){return new Promise(function(r){setTimeout(r,180)})},function(){});return p}
+function toast(s){var t=$('t');t.textContent=s;t.className='t s';clearTimeout(toast.h);toast.h=setTimeout(function(){t.className='t'},1800)}
+function C(n){req('/docmd?cmd='+n).then(function(){setTimeout(load,300)}).catch(function(){toast('No answer')})}
+function rgb(b,r,g,l){req('/savergb?v='+(b*16777216+r*65536+g*256+l)).then(function(){setTimeout(load,300)})}
+function wifi(){var s=$('ssid').value;if(!s){toast('Enter the network name');return}req('/configwifi?ssid='+encodeURIComponent(s)+'&pwd='+encodeURIComponent($('pwd').value));toast('Connecting - the device restarts when it works')}
+function host(){req('/savegd?apikey=&city=&ip='+encodeURIComponent($('host').value)).then(function(){toast('Saved')})}
+$('m').innerHTML=M.map(function(m){return '<button data-c="'+m[1]+'"><svg viewBox="0 0 24 24">'+I[m[0]]+'</svg>'+(m[0]=='Stats'?'PC stats':m[0]=='Album'?'Photos':m[0]=='Video'?'Videos':m[0])+'</button>'}).join('');
+[].forEach.call($('m').children,function(b){b.onclick=function(){C(+b.dataset.c);[].forEach.call($('m').children,function(x){x.className=''});b.className='a'}});
+$('sw').innerHTML=COL.map(function(c,i){return '<i style="background:rgb('+c+')" data-i="'+i+'"></i>'}).join('');
+[].forEach.call($('sw').children,function(e){e.onclick=function(){var c=COL[+e.dataset.i];rgb(Math.max(S.bri||100,1),c[0],c[1],c[2])}});
+var tv,tb;$('vol').oninput=function(){$('vv').textContent=this.value;clearTimeout(tv);var v=this.value;tv=setTimeout(function(){req('/savevol?v='+v)},200)};
+$('bri').oninput=function(){var v=+this.value;clearTimeout(tb);tb=setTimeout(function(){rgb(v,S.r,S.g,S.b)},200)};
+function seg(id,cur){$(id).innerHTML=LP[id].map(function(o,i){return '<button class="'+(i==cur?'a':'')+'" data-c="'+o[1]+'">'+o[0]+'</button>'}).join('');[].forEach.call($(id).children,function(b){b.onclick=function(){C(+b.dataset.c)}})}
+function load(){fetch('/getstatus').then(function(r){return r.json()}).then(function(d){
+ var ap=(d.Mark&8)==8;$('ap').className=ap?'':'h';$('main').style.display=ap?'none':'';
+ if(d.vol!=null&&document.activeElement!=$('vol')){$('vol').value=d.vol;$('vv').textContent=d.vol}
+ if(d.RGB!=null){var v=d.RGB;S.b=v&255;S.g=(v>>8)&255;S.r=(v>>16)&255;S.bri=(v>>24)&255;if(document.activeElement!=$('bri'))$('bri').value=S.bri}
+ if(d.PlayMode!=null){var p=d.PlayMode;seg('sv',(p>>2)&3);seg('sa',(p>>4)&3);seg('sm',(p>>6)&3)}
+ if((d.Mark&2)==2){$('gain').className='';$('sg').innerHTML=[0,1,2,3].map(function(i){return '<button class="'+(i==(d.Gain>>4&15)?'a':'')+'" data-c="'+(610+i)+'">'+i+'</button>'}).join('');[].forEach.call($('sg').children,function(b){b.onclick=function(){C(+b.dataset.c)}})}
+ if(d.HostIP&&document.activeElement!=$('host'))$('host').value=d.HostIP;
+ if(d.AppModes){[].forEach.call($('m').children,function(b){b.style.display=d.AppModes.indexOf(+b.dataset.c-100)<0?'none':''})}
+}).catch(function(){})}
+load();setInterval(load,4000);
+</script></body></html>

@@ -1,0 +1,272 @@
+#!/bin/sh
+# hubagent - MQTT bridge for the Huanjing Pro (runs on the device, busybox ash).
+#
+#  * Home Assistant MQTT discovery  -> the device shows up in HA by itself
+#  * commands -> the app's own local web API (http://127.0.0.1/docmd, /savevol, ...)
+#  * file jobs: pull a file from a URL onto the SD card (the app's own upload is capped
+#    and slow), list / delete / mkdir inside the media folders
+#
+# Topics (BASE=huanjing):  BASE/status (online|offline, retained, LWT)
+#                          BASE/state  (JSON, every 20 s and after every command)
+#                          BASE/cmd/<name>   BASE/ls   BASE/fetch/<id>
+. /etc/hubagent.conf      # BROKER PORT USER PASS BASE HUB_URL
+
+BASE=${BASE:-huanjing}
+APP=http://127.0.0.1
+SD=/mnt/SDCARD
+LOG=/tmp/hubagent.log
+MODEF=/tmp/hubagent.mode
+FOLDERS="pic video music weather clockbg txt"        # night7/ (the app itself) is off limits
+
+log() { echo "$(date +%H:%M:%S) $*" >>"$LOG"; }
+pub() { mosquitto_pub -h "$BROKER" -p "$PORT" -u "$USER" -P "$PASS" -t "$1" -m "$2" ${3:+-r} >/dev/null 2>&1; }
+api() { curl -s -m 6 "$APP$1"; }
+num() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }
+jesc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+# a relative path inside one of the media folders, no tricks
+safe_rel() {
+    case "$1" in ''|/*|*..*|*'\'*) return 1;; esac
+    top=${1%%/*}
+    for f in $FOLDERS; do [ "$top" = "$f" ] && return 0; done
+    return 1
+}
+
+# ---------- state ---------------------------------------------------------------
+publish_state() {
+    j=$(api /getstatus)
+    [ -z "$j" ] && return
+    vol=$(jsonfilter -s "$j" -e '@.vol'); rgb=$(jsonfilter -s "$j" -e '@.RGB')
+    pm=$(jsonfilter -s "$j" -e '@.PlayMode'); ver=$(jsonfilter -s "$j" -e '@.ver')
+    num "$rgb" || rgb=0; num "$pm" || pm=0
+    r=$(( (rgb >> 16) & 255 )); g=$(( (rgb >> 8) & 255 )); b=$(( rgb & 255 )); bri=$(( (rgb >> 24) & 255 ))
+    pv=$(( (pm >> 2) & 3 )); pp=$(( (pm >> 4) & 3 )); pmu=$(( (pm >> 6) & 3 ))
+    case $pv in 0) vl=One;; 1) vl=List;; *) vl=Shuffle;; esac
+    case $pmu in 0) ml=One;; 1) ml=List;; *) ml=Shuffle;; esac
+    case $pp in 0) al="Single";; 1) al="Slideshow";; 2) al="Random single";; *) al="Random slideshow";; esac
+    # the app's "volume 0" is only the lowest analog gain step (still audible): really mute the
+    # codec's digital volume while the app volume is 0, restore it otherwise
+    if [ "${vol:-0}" -eq 0 ]; then amixer sset 'DAC volume' 0 >/dev/null 2>&1; else amixer sset 'DAC volume' 160 >/dev/null 2>&1; fi
+    mode=None; [ -s "$MODEF" ] && mode=$(cat "$MODEF")
+    rssi=$(awk '/wlan0/{print int($4)}' /proc/net/wireless)
+    ip=$(ip -4 addr show wlan0 | awk '/inet /{sub(/\/.*/,"",$2);print $2}')
+    up=$(awk '{print int($1)}' /proc/uptime)
+    memfree=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+    sd=$(df -k "$SD" | awk 'NR==2{printf "%.2f %.2f %d", $4/1048576, $2/1048576, $3*100/$2}')
+    set -- $sd
+    pub "$BASE/state" "{\"volume\":${vol:-0},\"mode\":\"$mode\",\"video_loop\":\"$vl\",\"music_loop\":\"$ml\",\"album_mode\":\"$al\",\"wifi_dbm\":${rssi:-0},\"ip\":\"$ip\",\"uptime\":$up,\"mem_free_mb\":${memfree:-0},\"sd_free_gb\":${1:-0},\"sd_total_gb\":${2:-0},\"sd_used_pct\":${3:-0},\"app_version\":\"$ver\",\"app_md5\":\"$APPMD5\",\"agent_md5\":\"$AGENTMD5\"}"
+    on=ON; [ "$bri" -eq 0 ] && on=OFF
+    pub "$BASE/light" "{\"state\":\"$on\",\"brightness\":$bri,\"color_mode\":\"rgb\",\"color\":{\"r\":$r,\"g\":$g,\"b\":$b}}"
+    pub "$BASE/status" online 1
+}
+
+state_loop() { while true; do publish_state; sleep 20; done; }
+
+# ---------- Home Assistant discovery -------------------------------------------
+discovery() {
+    sn=$(jsonfilter -s "$(api /getstatus)" -e '@.SN')
+    ID=ixtlicube_${sn:-pro}
+    # remove the entities published under earlier names (empty retained payload = delete)
+    for OLD in huanjing_${sn:-pro} ixtli_${sn:-pro}; do
+        for co in select/mode number/volume light/ring select/video_loop select/music_loop select/album_mode \
+                  button/next button/previous button/restart_app button/reboot sensor/wifi sensor/sd_free \
+                  sensor/sd_used sensor/uptime sensor/memory sensor/ip; do
+            pub "homeassistant/${co%%/*}/$OLD/${co##*/}/config" "" 1
+        done
+    done
+    C="\"has_entity_name\":true,\"availability_topic\":\"$BASE/status\",\"device\":{\"identifiers\":[\"$ID\"],\"name\":\"Ixtli Holo Cube\",\"manufacturer\":\"The Pencreus\",\"model\":\"Ixtli Holo Cube (T113)\",\"configuration_url\":\"$HUB_URL\"}"
+    d() { pub "homeassistant/$1/$ID/$2/config" "{\"unique_id\":\"${ID}_$2\",$C,$3}" 1; }
+    ST="\"state_topic\":\"$BASE/state\""
+    d select mode "\"name\":\"App mode\",\"icon\":\"mdi:application\",$ST,\"value_template\":\"{{ value_json.mode }}\",\"command_topic\":\"$BASE/cmd/mode\",\"options\":[\"Clock\",\"Video\",\"Album\",\"Music\",\"Bluetooth\",\"Weather\",\"Spectrum\",\"AIDA64\"]"
+    d number volume "\"name\":\"Volume\",\"icon\":\"mdi:volume-high\",$ST,\"value_template\":\"{{ value_json.volume }}\",\"command_topic\":\"$BASE/cmd/volume\",\"min\":0,\"max\":100,\"step\":1,\"mode\":\"slider\""
+    d light ring "\"name\":\"Ring light\",\"schema\":\"json\",\"state_topic\":\"$BASE/light\",\"command_topic\":\"$BASE/cmd/light\",\"brightness\":true,\"brightness_scale\":100,\"supported_color_modes\":[\"rgb\"]"
+    d select video_loop "\"name\":\"Video play mode\",\"icon\":\"mdi:repeat\",$ST,\"value_template\":\"{{ value_json.video_loop }}\",\"command_topic\":\"$BASE/cmd/video_loop\",\"options\":[\"One\",\"List\",\"Shuffle\"]"
+    d select music_loop "\"name\":\"Music play mode\",\"icon\":\"mdi:repeat\",$ST,\"value_template\":\"{{ value_json.music_loop }}\",\"command_topic\":\"$BASE/cmd/music_loop\",\"options\":[\"One\",\"List\",\"Shuffle\"]"
+    d select album_mode "\"name\":\"Album play mode\",\"icon\":\"mdi:image-multiple\",$ST,\"value_template\":\"{{ value_json.album_mode }}\",\"command_topic\":\"$BASE/cmd/album_mode\",\"options\":[\"Single\",\"Slideshow\",\"Random single\",\"Random slideshow\"]"
+    d button next "\"name\":\"Next item\",\"icon\":\"mdi:skip-next\",\"command_topic\":\"$BASE/cmd/item\",\"payload_press\":\"next\""
+    d button previous "\"name\":\"Previous item\",\"icon\":\"mdi:skip-previous\",\"command_topic\":\"$BASE/cmd/item\",\"payload_press\":\"prev\""
+    d button reboot "\"name\":\"Restart\",\"device_class\":\"restart\",\"entity_category\":\"config\",\"command_topic\":\"$BASE/cmd/reboot\",\"payload_press\":\"1\""
+    d sensor wifi "\"name\":\"Wi-Fi signal\",\"device_class\":\"signal_strength\",\"unit_of_measurement\":\"dBm\",\"entity_category\":\"diagnostic\",$ST,\"value_template\":\"{{ value_json.wifi_dbm }}\""
+    d sensor sd_free "\"name\":\"SD card free\",\"device_class\":\"data_size\",\"unit_of_measurement\":\"GB\",\"entity_category\":\"diagnostic\",\"state_class\":\"measurement\",$ST,\"value_template\":\"{{ value_json.sd_free_gb }}\""
+    d sensor sd_used "\"name\":\"SD card used\",\"unit_of_measurement\":\"%\",\"icon\":\"mdi:sd\",\"entity_category\":\"diagnostic\",$ST,\"value_template\":\"{{ value_json.sd_used_pct }}\""
+    d sensor uptime "\"name\":\"Uptime\",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"entity_category\":\"diagnostic\",$ST,\"value_template\":\"{{ value_json.uptime }}\""
+    d sensor memory "\"name\":\"Free memory\",\"unit_of_measurement\":\"MB\",\"icon\":\"mdi:memory\",\"entity_category\":\"diagnostic\",$ST,\"value_template\":\"{{ value_json.mem_free_mb }}\""
+    d sensor ip "\"name\":\"IP address\",\"icon\":\"mdi:ip-network\",\"entity_category\":\"diagnostic\",$ST,\"value_template\":\"{{ value_json.ip }}\""
+}
+
+# ---------- commands -----------------------------------------------------------
+do_mode() {
+    case "$1" in
+        Clock) c=102;; Video) c=103;; Album) c=104;; Spectrum) c=105;; AIDA64) c=106;;
+        Weather) c=107;; Music) c=109;; Bluetooth) c=110;; *) return;;
+    esac
+    api "/docmd?cmd=$c" >/dev/null; echo "$1" >"$MODEF"
+}
+
+do_loop() { # kind value
+    case "$1:$2" in
+        video:One) c=400;; video:List) c=401;; video:Shuffle) c=402;;
+        music:One) c=420;; music:List) c=421;; music:Shuffle) c=422;;
+        album:Single) c=410;; album:Slideshow) c=411;; "album:Random single") c=412;; "album:Random slideshow") c=413;;
+        *) return;;
+    esac
+    api "/docmd?cmd=$c" >/dev/null
+}
+
+do_light() { # JSON payload from HA (schema json)
+    p=$1
+    st=$(jsonfilter -s "$p" -e '@.state')
+    cur=$(jsonfilter -s "$(api /getstatus)" -e '@.RGB'); num "$cur" || cur=0
+    r=$(( (cur >> 16) & 255 )); g=$(( (cur >> 8) & 255 )); b=$(( cur & 255 )); bri=$(( (cur >> 24) & 255 ))
+    nr=$(jsonfilter -s "$p" -e '@.color.r'); ng=$(jsonfilter -s "$p" -e '@.color.g'); nb=$(jsonfilter -s "$p" -e '@.color.b')
+    nbri=$(jsonfilter -s "$p" -e '@.brightness')
+    num "$nr" && r=$nr; num "$ng" && g=$ng; num "$nb" && b=$nb
+    if [ "$st" = OFF ]; then bri=0
+    elif num "$nbri"; then bri=$nbri
+    elif [ "$bri" -eq 0 ]; then bri=100; fi
+    [ "$bri" -gt 100 ] && bri=100
+    api "/savergb?v=$(( (bri << 24) | (r << 16) | (g << 8) | b ))" >/dev/null
+}
+
+do_ls() {
+    d=${1:-pic}; d=${d%/}
+    safe_rel "$d" || { pub "$BASE/ls" "{\"dir\":\"$(jesc "$d")\",\"error\":\"not allowed\"}"; return; }
+    list=$(ls -l "$SD/$d" 2>/dev/null | awk 'NR>1 && NF>=9 { n=$9; for(i=10;i<=NF;i++) n=n" "$i; gsub(/\\/,"\\\\",n); gsub(/"/,"\\\"",n); printf "%s{\"n\":\"%s\",\"s\":%s,\"d\":%d}", (c++?",":""), n, $5, ($1 ~ /^d/) }')
+    pub "$BASE/ls" "{\"dir\":\"$(jesc "$d")\",\"files\":[$list]}"
+}
+
+do_rm() {
+    safe_rel "$1" || { log "rm refused: $1"; return; }
+    [ -f "$SD/$1" ] && rm -f "$SD/$1" && log "rm $1"
+}
+
+do_mkdir() { safe_rel "$1" || return; mkdir -p "$SD/$1"; }
+
+do_fetch() { # JSON {id,url,dest,size}
+    id=$(jsonfilter -s "$1" -e '@.id'); url=$(jsonfilter -s "$1" -e '@.url')
+    dest=$(jsonfilter -s "$1" -e '@.dest'); size=$(jsonfilter -s "$1" -e '@.size')
+    t="$BASE/fetch/${id:-x}"
+    safe_rel "$dest" || { pub "$t" '{"state":"error","error":"destination not allowed"}'; return; }
+    case "$url" in http://*|https://*) ;; *) pub "$t" '{"state":"error","error":"bad url"}'; return;; esac
+    lp=$(cat /tmp/hubagent.fetch 2>/dev/null)
+    if num "$lp" && [ "$lp" -gt 1 ] && kill -0 "$lp" 2>/dev/null; then
+        pub "$t" '{"state":"error","error":"busy"}'; return
+    fi
+    num "$size" || size=0
+    free=$(df -k "$SD" | awk 'NR==2{print $4}')
+    if [ "$size" -gt 0 ] && [ $(( size / 1024 + 20480 )) -gt "$free" ]; then
+        pub "$t" '{"state":"error","error":"not enough space on the SD card"}'; return
+    fi
+    mkdir -p "$SD/$(dirname "$dest")"
+    part="$SD/$dest.part"; rm -f "$part"
+    log "fetch $dest <- $url ($size bytes)"
+    curl -s -f -L -m 14400 -o "$part" "$url" &
+    cp=$!
+    echo $cp >/tmp/hubagent.fetch
+    while kill -0 $cp 2>/dev/null; do
+        have=$(ls -l "$part" 2>/dev/null | awk '{print $5}')
+        pub "$t" "{\"state\":\"downloading\",\"bytes\":${have:-0},\"total\":$size}"
+        sleep 2
+    done
+    wait $cp; rc=$?
+    if [ $rc -eq 0 ]; then
+        mv -f "$part" "$SD/$dest"; sync
+        have=$(ls -l "$SD/$dest" | awk '{print $5}')
+        pub "$t" "{\"state\":\"done\",\"bytes\":${have:-0},\"total\":${have:-0}}"
+        log "fetch done $dest"
+    else
+        rm -f "$part"
+        pub "$t" "{\"state\":\"error\",\"error\":\"download failed (curl $rc)\"}"
+        log "fetch FAILED $dest rc=$rc"
+    fi
+    rm -f /tmp/hubagent.fetch
+}
+
+# ---------- over-the-air updates ------------------------------------------------
+# {"kind":"app"|"agent", "url":"<hub>/fw/...", "md5":"<32 hex>"}
+# Only accepts files from the hub, verifies the checksum, keeps the previous version, and the
+# app update rolls back by itself if the new app never gets healthy (see rc.local + /etc/ota_pending).
+do_ota() {
+    t="$BASE/ota"
+    kind=$(jsonfilter -s "$1" -e '@.kind'); url=$(jsonfilter -s "$1" -e '@.url'); want=$(jsonfilter -s "$1" -e '@.md5')
+    case "$url" in "$HUB_URL"/fw/*) ;; *) pub "$t" '{"state":"error","error":"url not from the hub"}'; return;; esac
+    pub "$t" "{\"state\":\"downloading\",\"kind\":\"$kind\"}"
+    rm -f /tmp/ota.new
+    curl -s -f -L -m 600 -o /tmp/ota.new "$url" || { pub "$t" '{"state":"error","error":"download failed"}'; return; }
+    got=$(md5sum /tmp/ota.new | cut -d' ' -f1)
+    [ "$got" = "$want" ] || { rm -f /tmp/ota.new; pub "$t" '{"state":"error","error":"checksum mismatch"}'; return; }
+    case "$kind" in
+    app)
+        [ "$(hexdump -n 4 -e '4/1 "%02x"' /tmp/ota.new)" = "7f454c46" ] || { rm -f /tmp/ota.new; pub "$t" '{"state":"error","error":"not an executable"}'; return; }
+        [ ! -f /etc/ota_pending ] && cp /usr/night7 /usr/night7.prev        # last known-good copy
+        cp /tmp/ota.new /usr/night7.new && chmod 755 /usr/night7.new && mv -f /usr/night7.new /usr/night7
+        rm -f /tmp/ota.new
+        echo 1 >/etc/ota_pending; sync
+        pub "$t" '{"state":"installed","kind":"app","note":"restarting"}'; log "ota app installed $got"
+        pub "$BASE/status" offline 1; reboot;;
+    agent)
+        sh -n /tmp/ota.new || { rm -f /tmp/ota.new; pub "$t" '{"state":"error","error":"syntax check failed"}'; return; }
+        cp /usr/bin/hubagent /usr/bin/hubagent.prev
+        cp /tmp/ota.new /usr/bin/hubagent.new && chmod 755 /usr/bin/hubagent.new && mv -f /usr/bin/hubagent.new /usr/bin/hubagent
+        rm -f /tmp/ota.new; sync
+        pub "$t" '{"state":"installed","kind":"agent","note":"restarting agent"}'; log "ota agent installed $got"
+        ( sleep 2; /etc/init.d/hubagent restart ) >/dev/null 2>&1 &;;
+    *) rm -f /tmp/ota.new; pub "$t" '{"state":"error","error":"unknown kind"}';;
+    esac
+}
+
+restart_app() {
+    killall night7 2>/dev/null; sleep 2
+    # touch /tmp/applog first to capture the app's own log in /tmp/app.log (debugging only)
+    if [ -e /tmp/applog ]; then (/usr/night7 >/tmp/app.log 2>&1 &); else (/usr/night7 >/dev/null 2>&1 &); fi
+}
+
+handle() { # topic payload
+    t=${1#"$BASE/cmd/"}; p=$2
+    log "cmd $t $p"
+    case "$t" in
+        mode)       do_mode "$p";;
+        item)       case "$p" in next) api "/docmd?cmd=301" >/dev/null;; prev) api "/docmd?cmd=300" >/dev/null;; esac;;
+        volume)     num "$p" && [ "$p" -le 100 ] && api "/savevol?v=$p" >/dev/null;;
+        light)      do_light "$p";;
+        video_loop) do_loop video "$p";;
+        music_loop) do_loop music "$p";;
+        album_mode) do_loop album "$p";;
+        restart_app) restart_app;;
+        reboot)     pub "$BASE/status" offline 1; sync; reboot;;
+        ls)         do_ls "$p";;
+        rm)         do_rm "$p";;
+        mkdir)      do_mkdir "$p";;
+        fetch)      do_fetch "$p" &;;
+        ota)        do_ota "$p" &;;
+        refresh)    :;;
+    esac
+    publish_state
+}
+
+# ---------- main ---------------------------------------------------------------
+: >"$LOG"
+log "hubagent starting"
+APPMD5=$(md5sum /usr/night7 | cut -c1-8); AGENTMD5=$(md5sum /usr/bin/hubagent | cut -c1-8)
+# a freshly OTA-installed app counts as good once it has answered for 40 s (else rc.local rolls it back)
+( until api /getstatus | grep -q DevModel; do sleep 3; done; sleep 40
+  api /getstatus | grep -q DevModel && rm -f /etc/ota_pending ) &
+until api /getstatus | grep -q DevModel; do sleep 3; done          # wait for the app
+until ping -c1 -W2 "$BROKER" >/dev/null 2>&1; do sleep 3; done       # wait for the network
+discovery
+state_loop &
+SL=$!
+trap 'kill $SL 2>/dev/null; killall mosquitto_sub 2>/dev/null; exit 0' TERM INT
+while true; do
+    mosquitto_sub -h "$BROKER" -p "$PORT" -u "$USER" -P "$PASS" -t "$BASE/cmd/#" -v \
+        --will-topic "$BASE/status" --will-payload offline --will-retain 2>>"$LOG" |
+    while IFS= read -r line; do
+        topic=${line%% *}; payload=${line#* }
+        [ "$topic" = "$line" ] && payload=
+        handle "$topic" "$payload"
+    done
+    log "broker connection lost, retrying"
+    sleep 5
+    discovery
+    [ "$(ls -l "$LOG" | awk '{print $5}')" -gt 200000 ] && : >"$LOG"
+done

@@ -1,0 +1,20 @@
+# secrets / local config
+.env
+secrets.env
+*.pem
+# vendor firmware, device dumps, media, screenshots: not ours to publish
+firmware/
+strings.json
+en_proxy.py
+fonts/
+shots/
+backup-stock-videos/
+hub/fw/
+hub/staging/
+hub/panels/
+hub/settings.json
+*.mp4
+!boot/out/pencreus_boot.mp4
+*.raw
+*.bin
+__pycache__/

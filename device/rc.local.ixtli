@@ -1,0 +1,54 @@
+# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+
+# OTA safety net: a new app that never became healthy (agent clears /etc/ota_pending after 40 s
+# of a working app) is rolled back to the previous version on the next boot.
+if [ -f /etc/ota_pending ]; then
+    n=$(cat /etc/ota_pending)
+    if [ "$n" -ge 2 ] 2>/dev/null; then
+        [ -f /usr/night7.prev ] && cp /usr/night7.prev /usr/night7 && chmod 755 /usr/night7
+        rm -f /etc/ota_pending
+    else
+        echo $((n + 1)) >/etc/ota_pending
+    fi
+fi
+
+# Pencreus boot splash (plays before the app; failsafe, see /usr/bin/ixtli-splash)
+[ -x /usr/bin/ixtli-splash ] && /usr/bin/ixtli-splash
+
+#判断是否有节点 "/dev/ubi0"
+if [ -e "/dev/ubi0" ]; then
+    #判断是否挂载成功
+    if ! mount | grep /mnt/SDCARD > /dev/null; then
+        #尝试挂载
+        mount /dev/mmcblk0p1 /mnt/SDCARD/
+    fi
+fi
+
+#检查是否挂载成功
+if mount | grep /mnt/SDCARD > /dev/null; then
+    #检查文件是否存在
+    if [ -f "/mnt/SDCARD/night7/night7_app" ]; then
+        #检查/usr/night7文件是否存在
+        if [ ! -f "/usr/night7" ]; then
+            cp /mnt/SDCARD/night7/night7_app /usr/night7
+            chmod +x /usr/night7
+        else
+            NEW_VERSION=$(strings /mnt/SDCARD/night7/night7_app | grep "Night7 AppVer" | awk -F ": " '{print $2}')
+            OLD_VERSION=$(strings /usr/night7 | grep "Night7 AppVer" | awk -F ": " '{print $2}')
+            if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+                cp /mnt/SDCARD/night7/night7_app /usr/night7_app
+                chmod +x /usr/night7_app
+                rm -f /usr/night7
+                mv /usr/night7_app /usr/night7
+            fi
+        fi
+    fi
+fi
+
+# boot silent: the agent un-mutes the codec only if the saved volume is above 0
+amixer sset 'DAC volume' 0 >/dev/null 2>&1
+
+/usr/night7 &
+
+exit 0

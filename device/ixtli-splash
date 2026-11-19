@@ -1,0 +1,13 @@
+#!/bin/sh
+# Plays the Pencreus boot animation once, with the device's own hardware player, before the
+# app starts. Failsafe: never blocks boot (the player is killed if it overruns).
+F=/usr/share/ixtli/pencreus_boot.mp4
+[ -f "$F" ] || exit 0
+( printf 'set url:%s\n' "$F"; printf 'prepare\n'; usleep 1200000; printf 'play\n'
+  usleep 7900000; printf 'stop\n'; usleep 300000; printf 'quit\n'; usleep 500000 ) | tplayerdemo >/dev/null 2>&1 &
+P=$!
+n=0
+while kill -0 $P 2>/dev/null && [ $n -lt 14 ]; do usleep 1000000; n=$((n+1)); done
+kill $P 2>/dev/null
+killall tplayerdemo 2>/dev/null
+exit 0

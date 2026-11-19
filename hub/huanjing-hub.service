@@ -1,0 +1,18 @@
+[Unit]
+Description=Huanjing Hub - web control and media manager for the Huanjing Pro
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/huanjing-hub
+EnvironmentFile=%h/huanjing-hub/.env
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8098 --workers 1
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
